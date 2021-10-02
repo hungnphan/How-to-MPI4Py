@@ -2,21 +2,25 @@ from mpi4py import MPI
 from mpi4py.util import dtlib
 import numpy as np
 import time
+import sys
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 size = comm.Get_size()
 
+###############################################################
+# INITIALIZATION
+###############################################################
 # Data types
 datatype_MPI = MPI.INT
-datatype_np  = dtlib.to_numpy_dtype(datatype_MPI)
+datatype_np = np.int32
 
 # Size of memory for RMA
 n_element = 10
-element_size = datatype_np.itemsize     # int type = 4
+element_size = np.dtype(datatype_np).itemsize
 
 # Arrays
-local_arr = rank*10 + np.arange(5, dtype=datatype_np)
+local_arr = rank*10 + np.arange(5, dtype=datatype_np)       # 00 01 02 03 04
 # print(f"Rank #{rank}: local_data = {local_arr}")
 
 # Define neighbors
@@ -27,24 +31,61 @@ prev_id = rank-1 if (rank != 0) else size-1
 # Define RMA windows
 win = MPI.Win.Allocate(n_element*element_size, element_size, MPI.INFO_NULL, comm)
 
-# Define a local "pointer (!?)"
+# Define a local "pointer"
 mem = np.frombuffer(win, dtype=datatype_np)
 
-win.Lock(rank)
+
+###############################################################
+# ONE-SIDE COMM. WITH PUT
+###############################################################
+win.Lock(rank=next_id, lock_type=MPI.LOCK_SHARED, assertion=0)
 win.Put(local_arr, next_id, [0,n_element,datatype_MPI])
-win.Unlock(rank)
-# print(f"Rank #{rank}: mem = {mem}")
+win.Unlock(next_id)
 
 comm.Barrier()
 
+# Set some values to RMA windows
 mem[:] = rank*11
-# print(f"Rank #{rank}: mem = {mem}")
+arr = np.arange(5, dtype=datatype_np)*10 + rank
+# print(f"Rank #{rank}: mem = {mem}"); sys.stdout.flush()
 
-arr = np.arange(5, dtype=datatype_np)*rank
+win.Lock(rank=prev_id, lock_type=MPI.LOCK_SHARED, assertion=0)
+win.Put(arr, prev_id, [5,5,datatype_MPI])
+win.Unlock(prev_id)
 
-win.Lock(rank)
-win.Put(arr, prev_id, [0,5,datatype_MPI])
-win.Unlock(rank)
+comm.Barrier()
+# print(f"Rank #{rank}: mem = {mem}"); sys.stdout.flush()
 
-print(f"Rank #{rank}: mem = {mem}")
+
+###############################################################
+# ONE-SIDE COMM. WITH GET
+###############################################################
+
+# Set some values to RMA windows
+mem[:] = rank*10 + np.arange(n_element, dtype=datatype_np)
+# print(f"Rank #{rank}: mem = {mem}"); sys.stdout.flush()
+
+recv_buff = np.zeros(n_element,dtype=datatype_np)
+# print(f"Rank #{rank}: recv_buff = {recv_buff}"); sys.stdout.flush()
+
+win.Lock(rank=next_id, lock_type=MPI.LOCK_SHARED, assertion=0)
+win.Get(recv_buff[rank:],next_id,[rank,5,datatype_MPI])
+win.Unlock(next_id)
+
+comm.Barrier()
+print(f"Rank #{rank}: recv_buff = {recv_buff}"); sys.stdout.flush()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
