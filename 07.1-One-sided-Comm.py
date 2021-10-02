@@ -1,42 +1,56 @@
-from mpi4py import MPI
-# from mpi4py.util import dtlib
+import mpi4py.MPI as mpi
 import numpy as np
-import cupy as cp
-import sys
+import time
+
+def main():
+    rank = mpi.COMM_WORLD.Get_rank()
+    n_proc = mpi.COMM_WORLD.Get_size()
+
+    buff = np.zeros(10, dtype='d')
+    win = mpi.Win.Create(buff, 1, mpi.INFO_NULL, mpi.COMM_WORLD)
+
+    # itemsize = mpi.DOUBLE.Get_size()
+    # n_item = 10
+    # buff = mpi.Alloc_mem(n_item*itemsize, info=mpi.INFO_NULL)
+    # print(type(buff))
+    # win = mpi.Win.Create(buff, 1, mpi.INFO_NULL, mpi.COMM_WORLD)
+
+    if (rank == 0):
+        buff.fill(1)
 
 
-comm = MPI.COMM_WORLD
-rank = comm.Get_rank()
+        win.Lock(1)
+        win.Put([buff, mpi.DOUBLE], 1)
+        win.Unlock(1)
 
-datatype = MPI.FLOAT
-# np_dtype = dtlib.to_numpy_dtype(datatype)
-itemsize = datatype.Get_size()
+        buff[-1] = 9
+        time.sleep(5)
 
-N = 10
+        arr = np.arange(10)
 
-win_size = N * itemsize if rank == 0 else 0
+        win.Lock(1)
+        win.Put([arr, mpi.DOUBLE], 1)
+        win.Unlock(1)
 
-win = MPI.Win.Allocate(win_size, comm=comm)
-buf = np.empty(N, dtype=np.float)
+    else:
+        holder = np.zeros(10)
+        failures = 0
 
-if rank == 0:
-    buf.fill(rank)
-    print(f"buf = {buf}")
 
-    win.Lock(rank=0)
-    win.Put(buf, target_rank=0)         # local buf -> win on rank 0
-    win.Unlock(rank=0)
+        time.sleep(15)
 
-    comm.Barrier()
+        # while (holder[-1] != 9):
+            # failures += 1
+        win.Lock(1)
+        win.Get([holder, mpi.DOUBLE], 1)
+        win.Unlock(1)
 
-else:
-    comm.Barrier()
+            # print(f"holder = {holder}")
+            # holder = win.tomemory()
 
-    win.Lock(rank=0)
-    win.Get(buf, target_rank=0)         # on rank {rank}: win on rank 0 -> buf
-    win.Unlock(rank=0)
+        # print('Took', failures, 'dials')
+        print(f"holder = {holder}")
 
-print(f"rank #{rank}: data={buf}")
+if __name__=='__main__':
+    main()
 
-# PUT: local buf -> remote win (target)
-# GET: remote win (target) -> local buf
